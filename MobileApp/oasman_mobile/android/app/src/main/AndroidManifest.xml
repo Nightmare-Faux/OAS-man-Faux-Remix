@@ -1,5 +1,5 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="com.example.oasman_mobile">
+    package="dev.oasman.oasman_mobile">
 
     <!-- Bluetooth Hardware Feature -->
     <uses-feature android:name="android.hardware.bluetooth" android:required="true" />
@@ -16,8 +16,7 @@
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" android:maxSdkVersion="30" />
 
-    <!-- Camera upload Permission -->
-    <uses-permission android:name="android.permission.CAMERA" />
+    <!-- Camera upload Permission (removed android.permission.CAMERA) -->
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
 
         <application
