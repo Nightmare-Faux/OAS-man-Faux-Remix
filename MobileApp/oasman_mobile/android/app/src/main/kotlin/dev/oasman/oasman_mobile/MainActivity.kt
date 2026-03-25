@@ -1,4 +1,4 @@
-package com.example.oasman_mobile
+package dev.oasman.oasman_mobile
 
 import io.flutter.embedding.android.FlutterActivity
 
