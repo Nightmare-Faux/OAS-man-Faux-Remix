@@ -13,10 +13,15 @@ SET_LOOP_TASK_STACK_SIZE(12*1024); // the default 1024*8 how now reached it's li
 #define DIM_SCREEN_TIME 60 * 1000 * getscreenDimTimeM()
 unsigned long dimScreenTime = 0;
 bool dimmed = false;
+
+// set pin number for the boot button
+const int BootButtonPin = 0; 
+
 void setup()
 {
 
     Serial.begin(115200);
+    
     // esp_bt_controller_mem_release(ESP_BT_MODE_BLE);
     esp_bt_controller_mem_release(ESP_BT_MODE_CLASSIC_BT); // should free a tad bit of memory
     // Serial.setDebugOutput(true);
@@ -87,15 +92,114 @@ void setup()
         setupdateResult(0);
     }
     set_brightness(getBrightnessFloat());
+    pinMode(BootButtonPin, INPUT); 
 }
 
 // auto lv_last_tick = millis();
 static int lastFreeHeap = 0;
 static unsigned long lastMemLog = 0;
 
+// variables for storing the pushbutton status
+int BootButtonState = 0;
+unsigned long bootBtnLastPressed = 0;
+unsigned long bootBtnLastReleased = 0;
+unsigned long bootBtnHoldTime = 0;
+bool bootButtonControllingAirUp = false;
+bool bootButtonLoadPresetStarted = false;
+int bootButtonPresetCount = 0;
+
+void bootButtonFunctionality() {
+    if (digitalRead(BootButtonPin) == LOW && BootButtonState == 0) {
+        BootButtonState = 1;
+        Serial.println("Boot button pressed");
+        // upon button press, check if the previous press was a quick press (<500ms) and that we aren't in the preset procedure
+        // if so, start air up
+        if (bootBtnHoldTime < 500 && !bootButtonLoadPresetStarted) {
+            // if the current press is within 500ms of the last press, start the air up procesure
+            if (millis() - bootBtnLastPressed < 500) {
+                bootButtonControllingAirUp = true;
+                showDialog("Airing up while held", lv_color_hex(0x00FF00));
+                // air up
+                setValveBit(FRONT_DRIVER_IN);
+                setValveBit(FRONT_PASSENGER_IN);
+                setValveBit(REAR_DRIVER_IN);
+                setValveBit(REAR_PASSENGER_IN);
+            }
+        }
+        if (bootButtonLoadPresetStarted) {
+            bootButtonPresetCount++;
+            if (bootButtonPresetCount > 5) {
+                showDialog("Preset loading cancelled", lv_color_hex(0xFF0000));
+                bootButtonLoadPresetStarted = false;
+            } else {
+                static char buf[14];
+                snprintf(buf, sizeof(buf), "Preset %i...", bootButtonPresetCount);
+                showDialog(buf, lv_color_hex(0xFFFF00));
+            }
+        }
+        bootBtnLastPressed = millis();
+    } else if (digitalRead(BootButtonPin) == HIGH && BootButtonState == 1) {
+        BootButtonState = 0;
+        Serial.println("Boot button released");
+        bootBtnLastReleased = millis();
+        bootBtnHoldTime = bootBtnLastReleased - bootBtnLastPressed;
+        // if long pressed and the long press wasn't for the emergency air up, start loading the preset procedure
+        if (bootBtnHoldTime > 1000 && !bootButtonLoadPresetStarted && !bootButtonControllingAirUp) {
+            bootButtonLoadPresetStarted = true;
+            bootButtonPresetCount = 0;
+            showDialog("Select preset...", lv_color_hex(0xFFFF00), 30000);
+        }
+        // upon button release, stop air up if it was being controlled
+        if (bootButtonControllingAirUp) {
+            bootButtonControllingAirUp = false;
+            showDialog("Airing up stopped", lv_color_hex(0xFFFF00));
+            // stop air up
+            unsetValveBit(FRONT_DRIVER_IN);
+            unsetValveBit(FRONT_PASSENGER_IN);
+            unsetValveBit(REAR_DRIVER_IN);
+            unsetValveBit(REAR_PASSENGER_IN);
+        }
+    }
+
+    // check if button is currently being held
+    if (bootBtnLastPressed > bootBtnLastReleased) {
+        // check if held longer than 1000ms, and that we aren't in the preset procedure or air up procedure
+        if (millis() - bootBtnLastPressed > 1000 && !bootButtonLoadPresetStarted && !bootButtonControllingAirUp) {
+            showDialog("Select preset...", lv_color_hex(0xFFFF00), 30000);
+        }
+    }
+
+    // check if preset procedure is started
+    if (bootButtonLoadPresetStarted) {
+        // check if button is released for longer than 1000ms (stopped changing preset numbers)
+        if (millis() - bootBtnLastReleased > 1000) {
+            bootButtonLoadPresetStarted = false;
+            if (bootButtonPresetCount >= 1 && bootButtonPresetCount <= 5) {
+                // send the preset first to the manifold
+                AirupQuickPacket pkt(bootButtonPresetCount - 1);
+                sendRestPacket(&pkt);
+
+                // update presets page if preset changes
+                if (currentPreset != bootButtonPresetCount) {
+                    scrPresets.setPreset(bootButtonPresetCount);
+                }
+
+                // show dialog of selected preset
+                static char buf[20];
+                snprintf(buf, sizeof(buf), "Preset %i loaded!", bootButtonPresetCount);
+                showDialog(buf, lv_color_hex(0x00FF00));
+            } else {
+                showDialog("Preset loading cancelled", lv_color_hex(0xFF0000));
+            }
+        }
+    }
+}
+
 void loop()
 {
     auto const now = millis();
+
+    bootButtonFunctionality();
 
     // Dev memory logging every 5 seconds
     if (now - lastMemLog >= 5000) {
