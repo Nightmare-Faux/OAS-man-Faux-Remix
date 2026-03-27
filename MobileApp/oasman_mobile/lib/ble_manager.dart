@@ -39,6 +39,7 @@ class BTOasIdentifier {
   static const int RESETAIPKT = 29;
   static const int BP32PKT = 30;
   static const int BROADCASTNAME = 35;
+  static const int UPDATESTATUSREQUEST = 36;
 }
 
 /// Config flags in ConfigValuesPacket.configFlagsBits (GETCONFIGVALUES).
@@ -144,6 +145,12 @@ class BLEManager extends ChangeNotifier {
   int pressureSensorMax = 0;
   int bagVolumePercentage = 0;
   int bagMaxPressure = 0;
+
+  /// Saved preset pressures: presetPressures[profileIndex] = [FP, RP, FD, RD]
+  Map<int, List<int>> presetPressures = {};
+
+  /// Firmware update status string returned by the manifold.
+  String updateStatus = '';
 
   /// Last received GETCONFIGVALUES args (100 bytes) for echoing back when saving.
   List<int>? _lastConfigArgs;
@@ -256,8 +263,7 @@ class BLEManager extends ChangeNotifier {
       notifyListeners();
 
       await discoverServices(device, context);
-      await sendRestCommand(
-          [BTOasIdentifier.GETCONFIGVALUES]); //ask for config from manifold
+      await _onConnectionCompleted();
 
       print("Successfully connected to ${device.name} (${device.id})");
       bleBroadcastName = device.name;
@@ -280,9 +286,7 @@ class BLEManager extends ChangeNotifier {
       notifyListeners();
 
       await discoverServices(device, context);
-
-      await sendRestCommand(
-          [BTOasIdentifier.GETCONFIGVALUES]); //ask for config from manifold
+      await _onConnectionCompleted();
 
       print("Successfully connected to ${device.name} (${device.id})");
       bleBroadcastName = device.name;
@@ -373,6 +377,31 @@ class BLEManager extends ChangeNotifier {
   void sendCompressorStatus(bool on) {
     sendRestCommand(buildRestPacket(
         BTOasIdentifier.COMPRESSORSTATUS, [BLEInt(on ? 1 : 0)]));
+  }
+
+  /// Mirrors Wireless_Controller's onBLEConnectionCompleted():
+  ///   sendConfigValuesPacket(false) + requestPreset() + sendUpdateStatusRequestPacket()
+  Future<void> _onConnectionCompleted() async {
+    await sendRestCommand([BTOasIdentifier.GETCONFIGVALUES]);
+    requestPresetData(2); // default preset 3 → 0-based index 2
+    sendUpdateStatusRequest();
+  }
+
+  /// Request the manifold's saved pressures for a preset (0-based index).
+  void requestPresetData(int presetIndex) {
+    sendRestCommand(buildRestPacket(BTOasIdentifier.PRESETREPORT, [
+      BLEShort(0),
+      BLEShort(0),
+      BLEShort(0),
+      BLEShort(0),
+      BLEShort(presetIndex),
+    ]));
+  }
+
+  /// Ask the manifold for its current update status string.
+  void sendUpdateStatusRequest() {
+    sendRestCommandString(
+        _encodeInt32(BTOasIdentifier.UPDATESTATUSREQUEST), 'UNKNOWN');
   }
 
   /// Discover services and characteristics. [context] optional for auth-fail dialog.
@@ -485,7 +514,8 @@ class BLEManager extends ChangeNotifier {
             }
           }
           break;
-        case BTOasIdentifier.GETCONFIGVALUES: // handle incoming config (args32[0], args32[1], args16[4], args16[5], args8[12+0..8])
+        case BTOasIdentifier
+              .GETCONFIGVALUES: // handle incoming config (args32[0], args32[1], args16[4], args16[5], args8[12+0..8])
           systemShutoffTimeM = _decodeInt32(data, 4); // args32()[0]
           final configFlagsBits = _decodeInt32(data, 8); // args32()[1]
           pressureSensorMax = _decodeShort(data, 12); // args16()[4]
@@ -495,20 +525,53 @@ class BLEManager extends ChangeNotifier {
           compressorOffPSI = data.length > 18 ? data[18] : 0;
           // setValues at data[19] - not needed for display
 
-          riseOnStart = (configFlagsBits & (1 << ConfigFlagsBit.CONFIG_RISE_ON_START)) != 0;
-          maintainPressure = (configFlagsBits & (1 << ConfigFlagsBit.CONFIG_MAINTAIN_PRESSURE)) != 0;
-          airOutOnShutoff = (configFlagsBits & (1 << ConfigFlagsBit.CONFIG_AIR_OUT_ON_SHUTOFF)) != 0;
-          safetyMode = (configFlagsBits & (1 << ConfigFlagsBit.CONFIG_SAFETY_MODE)) != 0;
-          aiStatusEnabled = (configFlagsBits & (1 << ConfigFlagsBit.CONFIG_AI_STATUS_ENABLED)) != 0;
+          riseOnStart =
+              (configFlagsBits & (1 << ConfigFlagsBit.CONFIG_RISE_ON_START)) !=
+                  0;
+          maintainPressure = (configFlagsBits &
+                  (1 << ConfigFlagsBit.CONFIG_MAINTAIN_PRESSURE)) !=
+              0;
+          airOutOnShutoff = (configFlagsBits &
+                  (1 << ConfigFlagsBit.CONFIG_AIR_OUT_ON_SHUTOFF)) !=
+              0;
+          safetyMode =
+              (configFlagsBits & (1 << ConfigFlagsBit.CONFIG_SAFETY_MODE)) != 0;
+          aiStatusEnabled = (configFlagsBits &
+                  (1 << ConfigFlagsBit.CONFIG_AI_STATUS_ENABLED)) !=
+              0;
 
           // Store full args (100 bytes) for echoing back when saving config
           if (data.length >= 104) {
             _lastConfigArgs = List<int>.from(data.sublist(4, 104));
             if (_lastConfigArgs!.length < 100) {
-              _lastConfigArgs!.addAll(List.filled(100 - _lastConfigArgs!.length, 0));
+              _lastConfigArgs!
+                  .addAll(List.filled(100 - _lastConfigArgs!.length, 0));
             }
           }
 
+          break;
+        case BTOasIdentifier.PRESETREPORT:
+          // args16[0..3] = wheel pressures, args16[4] = profile index
+          if (data.length >= 14) {
+            final fp = _decodeShort(data, 4);
+            final rp = _decodeShort(data, 6);
+            final fd = _decodeShort(data, 8);
+            final rd = _decodeShort(data, 10);
+            final profileIndex = _decodeShort(data, 12);
+            presetPressures[profileIndex] = [fp, rp, fd, rd];
+            debugPrint(
+                'PRESETREPORT preset=$profileIndex pressures=[$fp, $rp, $fd, $rd]');
+          }
+          break;
+        case BTOasIdentifier.UPDATESTATUSREQUEST:
+          // args contain a null-terminated C string starting at byte 4
+          if (data.length > 4) {
+            final strBytes = data.sublist(4);
+            final nullIdx = strBytes.indexOf(0);
+            updateStatus = String.fromCharCodes(
+                nullIdx >= 0 ? strBytes.sublist(0, nullIdx) : strBytes);
+            debugPrint('UPDATESTATUSREQUEST status=$updateStatus');
+          }
           break;
       }
 
@@ -619,9 +682,11 @@ class BLEManager extends ChangeNotifier {
 
   int _buildConfigFlagsBits() {
     int bits = 0;
-    if (maintainPressure) bits |= (1 << ConfigFlagsBit.CONFIG_MAINTAIN_PRESSURE);
+    if (maintainPressure)
+      bits |= (1 << ConfigFlagsBit.CONFIG_MAINTAIN_PRESSURE);
     if (riseOnStart) bits |= (1 << ConfigFlagsBit.CONFIG_RISE_ON_START);
-    if (airOutOnShutoff) bits |= (1 << ConfigFlagsBit.CONFIG_AIR_OUT_ON_SHUTOFF);
+    if (airOutOnShutoff)
+      bits |= (1 << ConfigFlagsBit.CONFIG_AIR_OUT_ON_SHUTOFF);
     if (safetyMode) bits |= (1 << ConfigFlagsBit.CONFIG_SAFETY_MODE);
     if (aiStatusEnabled) bits |= (1 << ConfigFlagsBit.CONFIG_AI_STATUS_ENABLED);
     return bits;

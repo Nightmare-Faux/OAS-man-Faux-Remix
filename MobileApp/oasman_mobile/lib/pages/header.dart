@@ -14,59 +14,49 @@ class Header extends StatelessWidget {
     final size = MediaQuery.of(context).size;
     final orientation = MediaQuery.of(context).orientation;
     final iconSize = orientation == Orientation.portrait
-        ? size.width * 0.07 // Portrait size
-        : size.width * 0.04; // Landscape size
+        ? size.width * 0.07
+        : size.width * 0.04;
 
     return Consumer2<BLEManager, UnitProvider>(
       builder: (context, bleManager, unitProvider, child) {
         return Container(
-          color: Colors.black, // Set the background color to black
+          color: Colors.black,
           child: Stack(
             children: [
               orientation == Orientation.portrait
                   ? _buildPortraitLayout(size, bleManager, unitProvider)
                   : _buildLandscapeLayout(size, bleManager, unitProvider),
-
-              // Bluetooth Icon with dynamic positioning
               Positioned(
-                  // Adjust position based on orientation
-                  top: orientation == Orientation.portrait
-                      ? size.height * 0.04 // Portrait top
-                      : size.height * 0.10, // Landscape top (adjust as needed)
-                  left: orientation == Orientation.portrait
-                      ? size.width * 0.01 // Portrait left
-                      : size.width * 0.18, // Landscape left (adjust as needed)
-                  child: Column(
-                    children: [
-                      GestureDetector(
-                        onTap: () {
-                          showDialog(
-                            context: context,
-                            builder: (_) => const BluetoothPopup(),
-                          );
-                        },
-                        child: Icon(
-                          Icons.bluetooth,
-                          color: bleManager.connectedDevice != null
-                              ? Colors.green
-                              : Colors.pink,
-                          size: iconSize,
-                        ),
+                top: orientation == Orientation.portrait
+                    ? 8
+                    : size.height * 0.10,
+                left: orientation == Orientation.portrait
+                    ? size.width * 0.01
+                    : size.width * 0.18,
+                child: Column(
+                  children: [
+                    GestureDetector(
+                      onTap: () {
+                        showDialog(
+                          context: context,
+                          builder: (_) => const BluetoothPopup(),
+                        );
+                      },
+                      child: Icon(
+                        Icons.bluetooth,
+                        color: bleManager.connectedDevice != null
+                            ? Colors.green
+                            : Colors.pink,
+                        size: iconSize,
                       ),
-                      if (bleManager.vehicleOn)
-                        Icon(
-                          Icons.key,
-                          color: Colors.green,
-                          size: iconSize,
-                        )
-                      else
-                        Icon(
-                          Icons.key_off,
-                          color: Colors.pink,
-                          size: iconSize,
-                        )
-                    ],
-                  )),
+                    ),
+                    if (bleManager.vehicleOn)
+                      Icon(Icons.key, color: Colors.green, size: iconSize)
+                    else
+                      Icon(Icons.key_off, color: Colors.pink, size: iconSize),
+                  ],
+                ),
+              ),
             ],
           ),
         );
@@ -74,28 +64,27 @@ class Header extends StatelessWidget {
     );
   }
 
-  // Portrait layout
   Widget _buildPortraitLayout(
       Size size, BLEManager bleManager, UnitProvider unitProvider) {
+    // Cap the header height so it never exceeds 40% of available space,
+    // but also keep a minimum so the car image remains visible.
+    final headerHeight = (size.height * 0.30).clamp(180.0, 320.0);
+
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Container(
-          margin: const EdgeInsets.only(top: 30),
-          height: size.height * 0.35,
+        SizedBox(
+          height: headerHeight,
           child: Stack(
             children: [
-              // Car Image
               Center(
                 child: CarImageWidget(
-                  width: size.width * 0.6,
-                  height: size.height * 0.3,
+                  width: size.width * 0.55,
+                  height: headerHeight * 0.7,
                 ),
               ),
-
-              // Pressure Info Widgets
               _buildPositionedInfo(
-                top: size.height * 0.00,
+                top: 0,
                 left: size.width * 0.1,
                 rawPressure: double.tryParse(
                         bleManager.pressureValues["frontLeft"] ?? "0") ??
@@ -105,7 +94,7 @@ class Header extends StatelessWidget {
                 unitProvider: unitProvider,
               ),
               _buildPositionedInfo(
-                top: size.height * 0.00,
+                top: 0,
                 right: size.width * 0.1,
                 rawPressure: double.tryParse(
                         bleManager.pressureValues["frontRight"] ?? "0") ??
@@ -117,7 +106,7 @@ class Header extends StatelessWidget {
                 unitProvider: unitProvider,
               ),
               _buildPositionedInfo(
-                bottom: size.height * 0.00,
+                bottom: 24,
                 left: size.width * 0.1,
                 rawPressure: double.tryParse(
                         bleManager.pressureValues["rearLeft"] ?? "0") ??
@@ -128,7 +117,7 @@ class Header extends StatelessWidget {
                 unitProvider: unitProvider,
               ),
               _buildPositionedInfo(
-                bottom: size.height * 0.00,
+                bottom: 24,
                 right: size.width * 0.1,
                 rawPressure: double.tryParse(
                         bleManager.pressureValues["rearRight"] ?? "0") ??
@@ -138,48 +127,13 @@ class Header extends StatelessWidget {
                 alignRight: true,
                 unitProvider: unitProvider,
               ),
-
-              // Centered Tank Pressure
               Align(
-                  alignment: Alignment
-                      .bottomCenter, // center horizontally and stick to bottom
-                  child: Row(
-                    mainAxisAlignment:
-                        MainAxisAlignment.center, // <-- center horizontally
-                    crossAxisAlignment:
-                        CrossAxisAlignment.center, // <-- center vertically
-                    children: [
-                      if (bleManager.safetyMode)
-                        Text('SAFETY MODE',
-                            style: TextStyle(
-                              color: Colors.pink,
-                              fontFamily: 'Bebas Neue',
-                              fontSize: 23,
-                            ))
-                      else ...[
-                        if (bleManager.compressorOn)
-                          Icon(Icons.power_settings_new,
-                              color: Colors.pink, size: 25),
-                        if (bleManager.compressorFrozen)
-                          Icon(Icons.ac_unit, color: Colors.pink, size: 25),
-
-                        SizedBox(width: 8), // spacing between icon and text
-
-                        Text(
-                          "${unitProvider.unit == 'Bar' ? unitProvider.convertToBar(double.tryParse(bleManager.pressureValues["tankPressure"] ?? "0") ?? 0.0).toStringAsFixed(2) : (double.tryParse(bleManager.pressureValues["tankPressure"] ?? "0") ?? 0.0).toStringAsFixed(2)} ${unitProvider.unit}",
-                          style: TextStyle(
-                            fontFamily: 'Bebas Neue',
-                            // TODO if compressor is low
-                            color: false
-                                ? Colors.white
-                                : Colors.pink, // <-- conditional
-                            fontSize: 25,
-                          ),
-                          textAlign: TextAlign.center,
-                        ),
-                      ],
-                    ],
-                  )),
+                alignment: Alignment.bottomCenter,
+                child: Padding(
+                  padding: const EdgeInsets.only(bottom: 2),
+                  child: _buildTankPressure(bleManager, unitProvider),
+                ),
+              ),
             ],
           ),
         ),
@@ -192,20 +146,16 @@ class Header extends StatelessWidget {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Container(
-          margin: const EdgeInsets.only(top: 30),
+        SizedBox(
           height: size.height - 97,
           child: Stack(
             children: [
-              // Car Image
               Center(
                 child: CarImageWidget(
                   width: size.width * 0.6,
                   height: size.height * 0.3,
                 ),
               ),
-
-              // Pressure Info Widgets
               _buildPositionedInfo(
                 top: size.height * 0.07,
                 left: size.width * 0.01,
@@ -250,39 +200,10 @@ class Header extends StatelessWidget {
                 alignRight: true,
                 unitProvider: unitProvider,
               ),
-
-              // Centered Tank Pressure
               Align(
-                  alignment: Alignment
-                      .bottomCenter, // center horizontally and stick to bottom
-                  child: Row(
-                    mainAxisAlignment:
-                        MainAxisAlignment.center, // <-- center horizontally
-                    crossAxisAlignment:
-                        CrossAxisAlignment.center, // <-- center vertically
-                    children: [
-                      if (bleManager.compressorOn)
-                        Icon(Icons.power_settings_new,
-                            color: Colors.pink, size: 25),
-                      if (bleManager.compressorFrozen)
-                        Icon(Icons.ac_unit, color: Colors.pink, size: 25),
-
-                      SizedBox(width: 8), // spacing between icon and text
-
-                      Text(
-                        "${unitProvider.unit == 'Bar' ? unitProvider.convertToBar(double.tryParse(bleManager.pressureValues["tankPressure"] ?? "0") ?? 0.0).toStringAsFixed(2) : (double.tryParse(bleManager.pressureValues["tankPressure"] ?? "0") ?? 0.0).toStringAsFixed(2)} ${unitProvider.unit}",
-                        style: TextStyle(
-                          fontFamily: 'Bebas Neue',
-                          // TODO if compressor is low
-                          color: false
-                              ? Colors.white
-                              : Colors.pink, // <-- conditional
-                          fontSize: 25,
-                        ),
-                        textAlign: TextAlign.center,
-                      ),
-                    ],
-                  )),
+                alignment: Alignment.bottomCenter,
+                child: _buildTankPressure(bleManager, unitProvider),
+              ),
             ],
           ),
         ),
@@ -290,7 +211,38 @@ class Header extends StatelessWidget {
     );
   }
 
-  // Helper method for positioned info
+  Widget _buildTankPressure(BLEManager bleManager, UnitProvider unitProvider) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (bleManager.safetyMode)
+          const Text('SAFETY MODE',
+              style: TextStyle(
+                color: Colors.pink,
+                fontFamily: 'Bebas Neue',
+                fontSize: 23,
+              ))
+        else ...[
+          if (bleManager.compressorOn)
+            const Icon(Icons.power_settings_new, color: Colors.pink, size: 22),
+          if (bleManager.compressorFrozen)
+            const Icon(Icons.ac_unit, color: Colors.pink, size: 22),
+          const SizedBox(width: 6),
+          Text(
+            "${unitProvider.unit == 'Bar' ? unitProvider.convertToBar(double.tryParse(bleManager.pressureValues["tankPressure"] ?? "0") ?? 0.0).toStringAsFixed(2) : (double.tryParse(bleManager.pressureValues["tankPressure"] ?? "0") ?? 0.0).toStringAsFixed(2)} ${unitProvider.unit}",
+            style: const TextStyle(
+              fontFamily: 'Bebas Neue',
+              color: Colors.pink,
+              fontSize: 22,
+            ),
+            textAlign: TextAlign.center,
+          ),
+        ],
+      ],
+    );
+  }
+
   Widget _buildPositionedInfo({
     double? top,
     double? bottom,
@@ -322,7 +274,6 @@ class Header extends StatelessWidget {
     );
   }
 
-  // Helper method for pressure and percentage display
   Widget _buildPressureInfo(
     String pressure,
     String percentage,
@@ -336,8 +287,8 @@ class Header extends StatelessWidget {
       children: [
         Transform.translate(
           offset: flipSvg && !alignRight || !flipSvg && alignRight
-              ? Offset(0, 30)
-              : Offset(0, 10), // x, y
+              ? const Offset(0, 30)
+              : const Offset(0, 10),
           child: Text(
             pressure,
             style: const TextStyle(
@@ -364,8 +315,8 @@ class Header extends StatelessWidget {
         const SizedBox(height: 4),
         Transform.translate(
           offset: flipSvg && !alignRight || !flipSvg && alignRight
-              ? Offset(0, 0)
-              : Offset(0, -18),
+              ? const Offset(0, 0)
+              : const Offset(0, -18),
           child: Text(
             percentage,
             style: const TextStyle(

@@ -282,74 +282,70 @@ class SettingsPageState extends State<SettingsPage> {
     if (!_settingsLoaded) {
       return const Center(child: CircularProgressIndicator());
     }
-    return Scaffold(
-      backgroundColor: const Color(0xFF121212),
-      appBar: AppBar(
-        backgroundColor: const Color(0xFF121212),
-        elevation: 0,
-        title: const Text(
-          'SETTINGS',
-          style: TextStyle(
-            fontSize: 25,
-            fontWeight: FontWeight.w600,
-            fontFamily: 'Roboto',
-            color: Colors.white,
-          ),
-        ),
-        centerTitle: true,
-      ),
-      body: Consumer<BLEManager>(
-        builder: (context, bleManager, _) {
-          return Column(
-            children: [
-              Expanded(
-                child: SingleChildScrollView(
-                  padding: const EdgeInsets.all(16.0),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      _buildUploadImageSection(),
-                      _buildBluetoothSection(),
-                      if (bleManager.isConnected()) ...[
-                        _buildStatusSection(),
-                        _buildBasicSettingsSection(),
-                        _buildDropDownWhenOffSection(),
-                        _buildLiftUpWhenOnSection(),
-                        _buildUnitsSection(context),
-                        _buildTankPressureSection(context),
-                        _buildAIStatusSection(),
-                        ElevatedButton(
-                          onPressed: () {
-                            try {
-                              bleManager.sendRestCommand([BTOasIdentifier.REBOOT]);
-                              debugPrint("Reboot the manifold");
-                            } catch (e) {
-                              debugPrint("Failed to send command: $e");
-                            }
-                          },
-                          style: ElevatedButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 20, vertical: 12),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                          ),
-                          child: const Text(
-                            "Reboot the manifold!",
-                            style: TextStyle(fontSize: 16),
-                          ),
-                        ),
-                      ] else ...[
-                        const ConnectManifoldCard(),
-                      ],
-                    ],
-                  ),
+    return Consumer<BLEManager>(
+      builder: (context, bleManager, _) {
+        return Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              child: Text(
+                'SETTINGS',
+                style: const TextStyle(
+                  fontSize: 25,
+                  fontWeight: FontWeight.w600,
+                  fontFamily: 'Roboto',
+                  color: Colors.white,
                 ),
               ),
-            ],
-          );
-        },
-      ),
+            ),
+            Expanded(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(16.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _buildUploadImageSection(),
+                    _buildBluetoothSection(),
+                    if (bleManager.isConnected()) ...[
+                      _buildStatusSection(),
+                      _buildBasicSettingsSection(),
+                      _buildDropDownWhenOffSection(),
+                      _buildLiftUpWhenOnSection(),
+                      _buildUnitsSection(context),
+                      _buildTankPressureSection(context),
+                      _buildAIStatusSection(),
+                      ElevatedButton(
+                        onPressed: () {
+                          try {
+                            bleManager
+                                .sendRestCommand([BTOasIdentifier.REBOOT]);
+                            debugPrint("Reboot the manifold");
+                          } catch (e) {
+                            debugPrint("Failed to send command: $e");
+                          }
+                        },
+                        style: ElevatedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 20, vertical: 12),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                        child: const Text(
+                          "Reboot the manifold!",
+                          style: TextStyle(fontSize: 16),
+                        ),
+                      ),
+                    ] else ...[
+                      const ConnectManifoldCard(),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 
@@ -598,7 +594,8 @@ class SettingsPageState extends State<SettingsPage> {
                         isNumberInput: true,
                         limitChar: 3,
                         units: "min",
-                        tooltip: "Define the number of minutes the air ride system remains powered after the ignition is switched off.",
+                        tooltip:
+                            "Define the number of minutes the air ride system remains powered after the ignition is switched off.",
                       ),
                     ),
                   ],
@@ -868,7 +865,7 @@ class SettingsPageState extends State<SettingsPage> {
                 hintStyle: TextStyle(color: Colors.white54),
                 suffixText: units,
               ),
-              onChanged: onChanged, 
+              onChanged: onChanged,
             ),
           ),
         ],

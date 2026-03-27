@@ -118,24 +118,25 @@ class _MainPageState extends State<MainPage> {
     final orientation = MediaQuery.of(context).orientation;
 
     return Scaffold(
-      body: orientation == Orientation.portrait
-          ? Column(
-              children: [
-                if (_selectedIndex == 0) const Header(), // Header at the top
-                Expanded(child: _pages[_selectedIndex]), // Main page below
-              ],
-            )
-          : Row(
-              children: [
-                // Left side (40% of screen) for header in landscape mode
-                SizedBox(
-                  width: size.width * 0.40,
-                  child: const Header(), // Header on the left side in landscape
-                ),
-                // Right side (60% of screen) for the selected page
-                Expanded(child: _pages[_selectedIndex]),
-              ],
-            ),
+      backgroundColor: const Color(0xFF121212),
+      body: SafeArea(
+        child: orientation == Orientation.portrait
+            ? Column(
+                children: [
+                  if (_selectedIndex == 0) const Header(),
+                  Expanded(child: _pages[_selectedIndex]),
+                ],
+              )
+            : Row(
+                children: [
+                  SizedBox(
+                    width: size.width * 0.40,
+                    child: const Header(),
+                  ),
+                  Expanded(child: _pages[_selectedIndex]),
+                ],
+              ),
+      ),
       bottomNavigationBar: CustomBottomNavigationBar(
         selectedIndex: _selectedIndex,
         onItemTapped: _onItemTapped,

@@ -24,7 +24,7 @@ enum SOLENOID_INDEX {
 
 class _ButtonsPageState extends State<ButtonsPage> {
   late BLEManager bleManager;
-  int _selectedPreset = -1;
+  int _selectedPreset = 3;
 
   @override
   void didChangeDependencies() {
@@ -34,221 +34,201 @@ class _ButtonsPageState extends State<ButtonsPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: const Color(0xFF121212),
-      body: Consumer<BLEManager>(
-        builder: (context, bleManager, _) {
-          return Stack(
-            children: [
-              if (!bleManager.isConnected())
-                Positioned(
-                  top: 0,
-                  left: 0,
-                  right: 0,
-                  child: Material(
-                    color: Colors.black87,
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 12.0),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          const Icon(Icons.bluetooth_disabled, color: Colors.white54, size: 20),
-                          const SizedBox(width: 8),
-                          const Text('Connect a manifold to control', style: TextStyle(color: Colors.white70, fontSize: 14)),
-                          const SizedBox(width: 12),
-                          TextButton(
-                            onPressed: () => showDialog(context: context, builder: (_) => const BluetoothPopup()),
-                            child: const Text('Connect', style: TextStyle(color: Color(0xFFBB86FC))),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              Opacity(
-                opacity: bleManager.isConnected() ? 1.0 : 0.5,
-                child: IgnorePointer(
-                  ignoring: !bleManager.isConnected(),
-                  child: LayoutBuilder(
-                    builder: (context, constraints) {
-                      return SingleChildScrollView(
-                child: ConstrainedBox(
-                  constraints: BoxConstraints(
-                    minHeight: constraints.maxHeight,
-                    minWidth: constraints.maxWidth,
-                  ),
-                  child: IntrinsicHeight(
-                    child: Column(
-                      children: [
-                        // Control Buttons Section
-                        Expanded(
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 16.0),
-                            child: Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                              children: [
-                                OvalControlButton(
-                                    iconUp: Icons.keyboard_arrow_up,
-                                    iconDown: Icons.keyboard_arrow_down,
-                                    onUpPressed: () => openValve(context,
-                                        SOLENOID_INDEX.FRONT_DRIVER_IN.index),
-                                    onDownPressed: () => openValve(context,
-                                        SOLENOID_INDEX.FRONT_DRIVER_OUT.index),
-                                    onReleasedButton: () =>
-                                        closeValves(context)),
-                                OvalControlButton(
-                                  iconUp: Icons.keyboard_double_arrow_up,
-                                  iconDown: Icons.keyboard_double_arrow_down,
-                                  isLarge: true,
-                                  onUpPressed: () => {
-                                    openValve(context,
-                                        SOLENOID_INDEX.FRONT_DRIVER_IN.index),
-                                    openValve(context,
-                                        SOLENOID_INDEX.FRONT_PASSENGER_IN.index)
-                                  },
-                                  onDownPressed: () => {
-                                    openValve(context,
-                                        SOLENOID_INDEX.FRONT_DRIVER_OUT.index),
-                                    openValve(
-                                        context,
-                                        SOLENOID_INDEX
-                                            .FRONT_PASSENGER_OUT.index)
-                                  },
-                                  onReleasedButton: () => closeValves(context),
-                                ),
-                                OvalControlButton(
-                                  iconUp: Icons.keyboard_arrow_up,
-                                  iconDown: Icons.keyboard_arrow_down,
-                                  onUpPressed: () => openValve(context,
-                                      SOLENOID_INDEX.FRONT_PASSENGER_IN.index),
-                                  onDownPressed: () => openValve(context,
-                                      SOLENOID_INDEX.FRONT_PASSENGER_OUT.index),
-                                  onReleasedButton: () => closeValves(context),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 15),
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                              children: [
-                                OvalControlButton(
-                                  iconUp: Icons.keyboard_arrow_up,
-                                  iconDown: Icons.keyboard_arrow_down,
-                                  onUpPressed: () => openValve(context,
-                                      SOLENOID_INDEX.REAR_DRIVER_IN.index),
-                                  onDownPressed: () => openValve(context,
-                                      SOLENOID_INDEX.REAR_DRIVER_OUT.index),
-                                  onReleasedButton: () => closeValves(context),
-                                ),
-                                OvalControlButton(
-                                  iconUp: Icons.keyboard_double_arrow_up,
-                                  iconDown: Icons.keyboard_double_arrow_down,
-                                  isLarge: true,
-                                  onUpPressed: () => {
-                                    openValve(context,
-                                        SOLENOID_INDEX.REAR_DRIVER_IN.index),
-                                    openValve(context,
-                                        SOLENOID_INDEX.REAR_PASSENGER_IN.index)
-                                  },
-                                  onDownPressed: () => {
-                                    openValve(context,
-                                        SOLENOID_INDEX.REAR_DRIVER_OUT.index),
-                                    openValve(context,
-                                        SOLENOID_INDEX.REAR_PASSENGER_OUT.index)
-                                  },
-                                  onReleasedButton: () => closeValves(context),
-                                ),
-                                OvalControlButton(
-                                  iconUp: Icons.keyboard_arrow_up,
-                                  iconDown: Icons.keyboard_arrow_down,
-                                  onUpPressed: () => openValve(context,
-                                      SOLENOID_INDEX.REAR_PASSENGER_IN.index),
-                                  onDownPressed: () => openValve(context,
-                                      SOLENOID_INDEX.REAR_PASSENGER_OUT.index),
-                                  onReleasedButton: () => closeValves(context),
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
+    return Consumer<BLEManager>(
+      builder: (context, bleManager, _) {
+        final connected = bleManager.isConnected();
 
-                    // Presets Section
-                    Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 15.0),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                            children: [
-                              for (int i = 1; i <= 5; i++)
-                                GestureDetector(
-                                  onTap: () => _onPresetTapped(context, i),
-                                  child: CircleAvatar(
-                                    backgroundColor: i == _selectedPreset
-                                        ? const Color(0xFFBB86FC)
-                                        : Colors.grey[800],
-                                    child: Text(
-                                      '$i',
-                                      style: TextStyle(
-                                        color: i == _selectedPreset
-                                            ? Colors.white
-                                            : Colors.grey[400],
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                            ],
-                          ),
-                          const SizedBox(height: 12),
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              OutlinedButton(
-                                onPressed: bleManager.connectedDevice != null &&
-                                        _selectedPreset >= 1
-                                    ? () => _confirmSavePreset(context)
-                                    : null,
-                                style: OutlinedButton.styleFrom(
-                                  foregroundColor: const Color(0xFFBB86FC),
-                                  side: const BorderSide(
-                                      color: Color(0xFFBB86FC)),
-                                ),
-                                child: const Text('Save'),
-                              ),
-                              const SizedBox(width: 16),
-                              ElevatedButton(
-                                onPressed: bleManager.connectedDevice != null &&
-                                        _selectedPreset >= 1
-                                    ? () => _confirmLoadPreset(context)
-                                    : null,
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: const Color(0xFFBB86FC),
-                                ),
-                                child: const Text('Load'),
-                              ),
-                            ],
-                          ),
-                        ],
+        return Column(
+          children: [
+            if (!connected)
+              Container(
+                color: Colors.black87,
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                child: Row(
+                  children: [
+                    const Icon(Icons.bluetooth_disabled,
+                        color: Colors.white54, size: 18),
+                    const SizedBox(width: 8),
+                    const Expanded(
+                      child: Text(
+                        'Connect a manifold to control',
+                        style: TextStyle(color: Colors.white70, fontSize: 13),
                       ),
+                    ),
+                    TextButton(
+                      onPressed: () => showDialog(
+                          context: context,
+                          builder: (_) => const BluetoothPopup()),
+                      child: const Text('Connect',
+                          style: TextStyle(color: Color(0xFFBB86FC))),
                     ),
                   ],
                 ),
               ),
-            ),
-          );
-        },
+            Expanded(
+              child: Opacity(
+                opacity: connected ? 1.0 : 0.4,
+                child: IgnorePointer(
+                  ignoring: !connected,
+                  child: Column(
+                    children: [
+                      Expanded(
+                        child: Center(
+                          child: _buildValveGrid(context),
+                        ),
+                      ),
+                      _buildPresetsBar(context, bleManager),
+                    ],
                   ),
                 ),
               ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildValveGrid(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+            children: [
+              _valve(context, SOLENOID_INDEX.FRONT_DRIVER_IN.index,
+                  SOLENOID_INDEX.FRONT_DRIVER_OUT.index, false),
+              _valve2(
+                  context,
+                  SOLENOID_INDEX.FRONT_DRIVER_IN.index,
+                  SOLENOID_INDEX.FRONT_PASSENGER_IN.index,
+                  SOLENOID_INDEX.FRONT_DRIVER_OUT.index,
+                  SOLENOID_INDEX.FRONT_PASSENGER_OUT.index),
+              _valve(context, SOLENOID_INDEX.FRONT_PASSENGER_IN.index,
+                  SOLENOID_INDEX.FRONT_PASSENGER_OUT.index, false),
             ],
-          );
-        },
+          ),
+          const SizedBox(height: 10),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+            children: [
+              _valve(context, SOLENOID_INDEX.REAR_DRIVER_IN.index,
+                  SOLENOID_INDEX.REAR_DRIVER_OUT.index, false),
+              _valve2(
+                  context,
+                  SOLENOID_INDEX.REAR_DRIVER_IN.index,
+                  SOLENOID_INDEX.REAR_PASSENGER_IN.index,
+                  SOLENOID_INDEX.REAR_DRIVER_OUT.index,
+                  SOLENOID_INDEX.REAR_PASSENGER_OUT.index),
+              _valve(context, SOLENOID_INDEX.REAR_PASSENGER_IN.index,
+                  SOLENOID_INDEX.REAR_PASSENGER_OUT.index, false),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _valve(BuildContext ctx, int inBit, int outBit, bool large) {
+    return OvalControlButton(
+      iconUp: Icons.keyboard_arrow_up,
+      iconDown: Icons.keyboard_arrow_down,
+      isLarge: large,
+      onUpPressed: () => openValve(ctx, inBit),
+      onDownPressed: () => openValve(ctx, outBit),
+      onReleasedButton: () => closeValves(ctx),
+    );
+  }
+
+  Widget _valve2(BuildContext ctx, int in1, int in2, int out1, int out2) {
+    return OvalControlButton(
+      iconUp: Icons.keyboard_double_arrow_up,
+      iconDown: Icons.keyboard_double_arrow_down,
+      isLarge: true,
+      onUpPressed: () {
+        openValve(ctx, in1);
+        openValve(ctx, in2);
+      },
+      onDownPressed: () {
+        openValve(ctx, out1);
+        openValve(ctx, out2);
+      },
+      onReleasedButton: () => closeValves(ctx),
+    );
+  }
+
+  Widget _buildPresetsBar(BuildContext context, BLEManager bleManager) {
+    final canUsePresetActions =
+        bleManager.connectedDevice != null && _selectedPreset >= 1;
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+            children: [
+              for (int i = 1; i <= 5; i++)
+                GestureDetector(
+                  onTap: () => _onPresetTapped(context, i),
+                  child: CircleAvatar(
+                    radius: 18,
+                    backgroundColor: i == _selectedPreset
+                        ? const Color(0xFFBB86FC)
+                        : Colors.grey[800],
+                    child: Text(
+                      '$i',
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: i == _selectedPreset
+                            ? Colors.white
+                            : Colors.grey[400],
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              OutlinedButton(
+                onPressed: canUsePresetActions
+                    ? () => _confirmSavePreset(context)
+                    : null,
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: const Color(0xFFBB86FC),
+                  side: const BorderSide(color: Color(0xFFBB86FC)),
+                  disabledForegroundColor: Colors.white60,
+                  backgroundColor: const Color(0xFF1E1E1E),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+                ),
+                child: const Text('Save'),
+              ),
+              const SizedBox(width: 16),
+              ElevatedButton(
+                onPressed: canUsePresetActions
+                    ? () => _confirmLoadPreset(context)
+                    : null,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFFBB86FC),
+                  foregroundColor: Colors.white,
+                  disabledBackgroundColor: const Color(0xFF2A2A2A),
+                  disabledForegroundColor: Colors.white60,
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+                ),
+                child: const Text('Load'),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }
@@ -292,9 +272,8 @@ class _ButtonsPageState extends State<ButtonsPage> {
   }
 
   void _sendLoadPreset(int presetNum) {
-    bleManager.sendRestCommand(bleManager.buildRestPacket(
-        BTOasIdentifier.AIRUPQUICK, [BLEInt(presetNum - 1)]));
-    print('Preset $presetNum Load sent');
+    bleManager.sendRestCommand(bleManager
+        .buildRestPacket(BTOasIdentifier.AIRUPQUICK, [BLEInt(presetNum - 1)]));
   }
 
   void _confirmLoadPreset(BuildContext context) {
@@ -352,7 +331,6 @@ class _ButtonsPageState extends State<ButtonsPage> {
             BTOasIdentifier.SAVECURRENTPRESSURESTOPROFILE,
             [BLEInt(_selectedPreset - 1)]));
         bleManager.sendRestCommand([BTOasIdentifier.GETCONFIGVALUES]);
-        print('Save preset $_selectedPreset sent');
       }
     });
   }
@@ -360,7 +338,6 @@ class _ButtonsPageState extends State<ButtonsPage> {
   void openValve(BuildContext context, int bit) {
     if (bleManager.connectedDevice != null) {
       bleManager.setValveBit(bit);
-      print('Valve set');
     } else {
       showDialog(
         context: context,
@@ -372,7 +349,6 @@ class _ButtonsPageState extends State<ButtonsPage> {
   void closeValves(BuildContext context) {
     if (bleManager.connectedDevice != null) {
       bleManager.closeValves();
-      print('Valve cleared');
     } else {
       showDialog(
         context: context,
@@ -390,43 +366,39 @@ class OvalControlButton extends StatelessWidget {
   final VoidCallback? onDownPressed;
   final VoidCallback? onReleasedButton;
 
-  const OvalControlButton(
-      {super.key,
-      required this.iconUp,
-      required this.iconDown,
-      this.isLarge = false,
-      this.onUpPressed,
-      this.onDownPressed,
-      this.onReleasedButton});
+  const OvalControlButton({
+    super.key,
+    required this.iconUp,
+    required this.iconDown,
+    this.isLarge = false,
+    this.onUpPressed,
+    this.onDownPressed,
+    this.onReleasedButton,
+  });
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: isLarge ? 60 : 50,
-      height: isLarge ? 110 : 80,
+      width: isLarge ? 56 : 48,
+      height: isLarge ? 96 : 72,
       decoration: BoxDecoration(
-        color: const Color(0xFF121212),
-        borderRadius: BorderRadius.circular(isLarge ? 40 : 30),
-        boxShadow: [
-          BoxShadow(
-            color: const Color(0xFFBB86FC).withOpacity(0.1),
-            blurRadius: 15,
-            spreadRadius: 2,
-          ),
-        ],
+        color: const Color(0xFF1E1E1E),
+        borderRadius: BorderRadius.circular(isLarge ? 28 : 24),
+        border: Border.all(
+          color: const Color(0xFFBB86FC).withOpacity(0.15),
+          width: 1,
+        ),
       ),
       child: Column(
         mainAxisAlignment: MainAxisAlignment.spaceEvenly,
         children: [
           ControlButton(
             icon: iconUp,
-            alignment: Alignment.topCenter,
             onPressed: onUpPressed,
             onReleased: onReleasedButton,
           ),
           ControlButton(
             icon: iconDown,
-            alignment: Alignment.bottomCenter,
             onPressed: onDownPressed,
             onReleased: onReleasedButton,
           ),
@@ -438,18 +410,12 @@ class OvalControlButton extends StatelessWidget {
 
 class ControlButton extends StatelessWidget {
   final IconData icon;
-  final bool isLarge;
-  final double? iconSize;
-  final AlignmentGeometry alignment;
   final VoidCallback? onPressed;
   final VoidCallback? onReleased;
 
   const ControlButton({
     super.key,
     required this.icon,
-    this.isLarge = false,
-    this.iconSize,
-    this.alignment = Alignment.center,
     this.onPressed,
     this.onReleased,
   });
@@ -457,26 +423,16 @@ class ControlButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
-      onTapDown: (_) {
-        onPressed!();
-      },
-      onTapUp: (_) {
-        onReleased!();
-      },
-      child: Container(
-        width: isLarge ? 40 : 40,
-        height: isLarge ? 40 : 40,
-        decoration: BoxDecoration(
-          color: const Color(0xFF121212),
-          borderRadius: BorderRadius.circular(isLarge ? 30 : 20),
-        ),
-        child: Align(
-          alignment: alignment,
-          child: Icon(
-            icon,
-            color: const Color(0xFFBB86FC),
-            size: iconSize ?? (isLarge ? 22 : 20),
-          ),
+      onTapDown: (_) => onPressed?.call(),
+      onTapUp: (_) => onReleased?.call(),
+      onTapCancel: () => onReleased?.call(),
+      child: SizedBox(
+        width: 36,
+        height: 32,
+        child: Icon(
+          icon,
+          color: const Color(0xFFBB86FC),
+          size: 22,
         ),
       ),
     );
