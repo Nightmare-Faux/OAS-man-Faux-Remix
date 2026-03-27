@@ -317,8 +317,8 @@ class SettingsPageState extends State<SettingsPage> {
                       ElevatedButton(
                         onPressed: () {
                           try {
-                            bleManager
-                                .sendRestCommand([BTOasIdentifier.REBOOT]);
+                            bleManager.sendRestCommand(bleManager
+                                .buildRestPacket(BTOasIdentifier.REBOOT, []));
                             debugPrint("Reboot the manifold");
                           } catch (e) {
                             debugPrint("Failed to send command: $e");

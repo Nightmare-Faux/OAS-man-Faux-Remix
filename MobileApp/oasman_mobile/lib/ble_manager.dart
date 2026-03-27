@@ -280,7 +280,7 @@ class BLEManager extends ChangeNotifier {
     try {
       _startGlobalConnListener(); // ensure listener is active
       print("Connecting to device: ${device.name} (${device.id})");
-      await device.connect(autoConnect: true);
+      await device.connect(autoConnect: false);
 
       connectedDevice = device;
       notifyListeners();
@@ -302,7 +302,7 @@ class BLEManager extends ChangeNotifier {
 
   void _retryConnection(BluetoothDevice device) async {
     try {
-      await device.connect(autoConnect: true);
+      await device.connect(autoConnect: false);
     } catch (e) {
       debugPrint("Reconnect failed: $e");
       Future.delayed(const Duration(seconds: 3), () {
@@ -382,7 +382,7 @@ class BLEManager extends ChangeNotifier {
   /// Mirrors Wireless_Controller's onBLEConnectionCompleted():
   ///   sendConfigValuesPacket(false) + requestPreset() + sendUpdateStatusRequestPacket()
   Future<void> _onConnectionCompleted() async {
-    await sendRestCommand([BTOasIdentifier.GETCONFIGVALUES]);
+    await sendRestCommand(buildRestPacket(BTOasIdentifier.GETCONFIGVALUES, []));
     requestPresetData(2); // default preset 3 → 0-based index 2
     sendUpdateStatusRequest();
   }
