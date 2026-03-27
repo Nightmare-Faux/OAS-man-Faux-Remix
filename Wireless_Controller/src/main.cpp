@@ -108,15 +108,27 @@ bool bootButtonControllingAirUp = false;
 bool bootButtonLoadPresetStarted = false;
 int bootButtonPresetCount = 0;
 
+void wakeScreenFromDim() {
+    auto const now = millis();
+    if (dimmed)
+    {
+        set_brightness(getBrightnessFloat());
+        dimmed = false;
+    }
+    dimScreenTime = now + DIM_SCREEN_TIME;
+}
+
 void bootButtonFunctionality() {
+    auto const now = millis();
     if (digitalRead(BootButtonPin) == LOW && BootButtonState == 0) {
+        wakeScreenFromDim();
         BootButtonState = 1;
         Serial.println("Boot button pressed");
         // upon button press, check if the previous press was a quick press (<500ms) and that we aren't in the preset procedure
         // if so, start air up
         if (bootBtnHoldTime < 500 && !bootButtonLoadPresetStarted) {
             // if the current press is within 500ms of the last press, start the air up procesure
-            if (millis() - bootBtnLastPressed < 500) {
+            if (now - bootBtnLastPressed < 500) {
                 bootButtonControllingAirUp = true;
                 showDialog("Airing up while held", lv_color_hex(0x00FF00));
                 // air up
@@ -137,14 +149,15 @@ void bootButtonFunctionality() {
                 showDialog(buf, lv_color_hex(0xFFFF00));
             }
         }
-        bootBtnLastPressed = millis();
+        bootBtnLastPressed = now;
     } else if (digitalRead(BootButtonPin) == HIGH && BootButtonState == 1) {
+        wakeScreenFromDim();
         BootButtonState = 0;
         Serial.println("Boot button released");
-        bootBtnLastReleased = millis();
+        bootBtnLastReleased = now;
         bootBtnHoldTime = bootBtnLastReleased - bootBtnLastPressed;
         // if long pressed and the long press wasn't for the emergency air up, start loading the preset procedure
-        if (bootBtnHoldTime > 1000 && !bootButtonLoadPresetStarted && !bootButtonControllingAirUp) {
+        if (bootBtnHoldTime > 500 && !bootButtonLoadPresetStarted && !bootButtonControllingAirUp) {
             bootButtonLoadPresetStarted = true;
             bootButtonPresetCount = 0;
             showDialog("Select preset...", lv_color_hex(0xFFFF00), 30000);
@@ -163,8 +176,8 @@ void bootButtonFunctionality() {
 
     // check if button is currently being held
     if (bootBtnLastPressed > bootBtnLastReleased) {
-        // check if held longer than 1000ms, and that we aren't in the preset procedure or air up procedure
-        if (millis() - bootBtnLastPressed > 1000 && !bootButtonLoadPresetStarted && !bootButtonControllingAirUp) {
+        // check if held longer than 500ms, and that we aren't in the preset procedure or air up procedure
+        if (now - bootBtnLastPressed > 500 && !bootButtonLoadPresetStarted && !bootButtonControllingAirUp) {
             showDialog("Select preset...", lv_color_hex(0xFFFF00), 30000);
         }
     }
@@ -172,7 +185,7 @@ void bootButtonFunctionality() {
     // check if preset procedure is started
     if (bootButtonLoadPresetStarted) {
         // check if button is released for longer than 1000ms (stopped changing preset numbers)
-        if (millis() - bootBtnLastReleased > 1000) {
+        if (now - bootBtnLastReleased > 1000) {
             bootButtonLoadPresetStarted = false;
             if (bootButtonPresetCount >= 1 && bootButtonPresetCount <= 5) {
                 // send the preset first to the manifold
@@ -218,12 +231,7 @@ void loop()
 
     if (isTouched())
     {
-        if (dimmed)
-        {
-            set_brightness(getBrightnessFloat());
-            dimmed = false;
-        }
-        dimScreenTime = now + DIM_SCREEN_TIME;
+        wakeScreenFromDim();
     }
 
     if (dimScreenTime < now && dimmed == false)
