@@ -33,6 +33,7 @@ class MyApp extends StatefulWidget {
 
 class _MyAppState extends State<MyApp> {
   bool _isReady = false;
+  bool _autoConnectTriggered = false;
 
   @override
   void initState() {
@@ -42,11 +43,6 @@ class _MyAppState extends State<MyApp> {
 
   Future<void> _initializeApp() async {
     await loadGlobalSettings(); // Load settings at startup
-    if (globalSettings?.pairedManifoldId != '') { //in case if saved/paired device exists
-      final bleManager = BLEManager();
-      await bleManager.startScan(); // Auto-connect logic inside startScan
-    }
-
     setState(() => _isReady = true);
   }
 
@@ -59,6 +55,15 @@ class _MyAppState extends State<MyApp> {
           body: Center(child: CircularProgressIndicator()),
         ),
       );
+    }
+
+    // Enable background auto-reconnect once when app becomes ready
+    if (!_autoConnectTriggered) {
+      _autoConnectTriggered = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!context.mounted) return;
+        Provider.of<BLEManager>(context, listen: false).enableAutoReconnect();
+      });
     }
 
     // App is ready, use globalSettings
@@ -111,24 +116,25 @@ class _MainPageState extends State<MainPage> {
     final orientation = MediaQuery.of(context).orientation;
 
     return Scaffold(
-      body: orientation == Orientation.portrait
-          ? Column(
-              children: [
-                if (_selectedIndex == 0) const Header(), // Header at the top
-                Expanded(child: _pages[_selectedIndex]), // Main page below
-              ],
-            )
-          : Row(
-              children: [
-                // Left side (40% of screen) for header in landscape mode
-                SizedBox(
-                  width: size.width * 0.40,
-                  child: const Header(), // Header on the left side in landscape
-                ),
-                // Right side (60% of screen) for the selected page
-                Expanded(child: _pages[_selectedIndex]),
-              ],
-            ),
+      backgroundColor: const Color(0xFF121212),
+      body: SafeArea(
+        child: orientation == Orientation.portrait
+            ? Column(
+                children: [
+                  if (_selectedIndex == 0) const Header(),
+                  Expanded(child: _pages[_selectedIndex]),
+                ],
+              )
+            : Row(
+                children: [
+                  SizedBox(
+                    width: size.width * 0.40,
+                    child: const Header(),
+                  ),
+                  Expanded(child: _pages[_selectedIndex]),
+                ],
+              ),
+      ),
       bottomNavigationBar: CustomBottomNavigationBar(
         selectedIndex: _selectedIndex,
         onItemTapped: _onItemTapped,

@@ -9,6 +9,9 @@ import 'package:permission_handler/permission_handler.dart';
 import "dart:typed_data";
 import 'models/appSettings.dart';
 
+/// OASMan BLE service UUID; filter scans to only show manifold devices.
+const String oasmanServiceUuid = '679425c8-d3b4-4491-9eb2-3e3d15b625f0';
+
 class BTOasIdentifier {
   static const int IDLE = 0;
   static const int STATUSREPORT = 1;
@@ -36,6 +39,7 @@ class BTOasIdentifier {
   static const int RESETAIPKT = 29;
   static const int BP32PKT = 30;
   static const int BROADCASTNAME = 35;
+  static const int UPDATESTATUSREQUEST = 36;
 }
 
 /// Config flags in ConfigValuesPacket.configFlagsBits (GETCONFIGVALUES).
@@ -93,22 +97,55 @@ class BLEManager extends ChangeNotifier {
   StreamSubscription<List<int>>? restStream;
   StreamSubscription<List<int>>? statusStream;
   StreamSubscription<OnConnectionStateChangedEvent>? _globalConnSub;
+  Timer? _reconnectTimer;
+  bool _autoReconnectEnabled = false;
+
+  /// Start the background reconnect loop. Safe to call multiple times.
+  void enableAutoReconnect() {
+    _autoReconnectEnabled = true;
+    _startGlobalConnListener();
+    _scheduleReconnectScan();
+  }
+
+  /// Stop the background reconnect loop (e.g. when manually disconnecting).
+  void disableAutoReconnect() {
+    _autoReconnectEnabled = false;
+    _reconnectTimer?.cancel();
+    _reconnectTimer = null;
+  }
+
+  void _scheduleReconnectScan() {
+    _reconnectTimer?.cancel();
+    if (!_autoReconnectEnabled) return;
+    if (connectedDevice != null) return;
+
+    final pairedId = globalSettings?.pairedManifoldId ?? '';
+    if (pairedId.isEmpty) return;
+
+    _reconnectTimer = Timer(const Duration(seconds: 5), () {
+      if (connectedDevice == null && _autoReconnectEnabled) {
+        debugPrint('Auto-reconnect: starting scan...');
+        startScan();
+      }
+    });
+  }
 
   void _startGlobalConnListener() {
     _globalConnSub?.cancel();
     _globalConnSub =
         FlutterBluePlus.events.onConnectionStateChanged.listen((event) {
-      // fires for ALL devices
       debugPrint(
           'Global conn event: ${event.device.id} -> ${event.connectionState}');
       if (connectedDevice?.id == event.device.id &&
           event.connectionState == BluetoothConnectionState.disconnected) {
-        print('Manifold disconnected!');
+        debugPrint('Manifold disconnected!');
         connectedDevice = null;
         vehicleOn = false;
         restCharacteristic = null;
         statusCharacteristic = null;
+        valveControlCharacteristic = null;
         notifyListeners();
+        _scheduleReconnectScan();
       }
     });
   }
@@ -133,6 +170,7 @@ class BLEManager extends ChangeNotifier {
   bool maintainPressure = false;
   bool airOutOnShutoff = false;
   bool safetyMode = true;
+  bool aiStatusEnabled = false;
   String bleBroadcastName = '';
   int compressorOnPSI = 0;
   int compressorOffPSI = 0;
@@ -140,6 +178,12 @@ class BLEManager extends ChangeNotifier {
   int pressureSensorMax = 0;
   int bagVolumePercentage = 0;
   int bagMaxPressure = 0;
+
+  /// Saved preset pressures: presetPressures[profileIndex] = [FP, RP, FD, RD]
+  Map<int, List<int>> presetPressures = {};
+
+  /// Firmware update status string returned by the manifold.
+  String updateStatus = '';
 
   /// Last received GETCONFIGVALUES args (100 bytes) for echoing back when saving.
   List<int>? _lastConfigArgs;
@@ -159,12 +203,19 @@ class BLEManager extends ChangeNotifier {
     writeValveValue(valveControlValue);
   }
 
+  /// Valve control is a 4-byte little-endian uint32 (matches Wireless_Controller).
   Future<void> writeValveValue(int value) async {
     if (valveControlCharacteristic != null) {
       try {
         if (valveControlCharacteristic!.properties.write) {
+          final bytes = [
+            value & 0xFF,
+            (value >> 8) & 0xFF,
+            (value >> 16) & 0xFF,
+            (value >> 24) & 0xFF,
+          ];
           await valveControlCharacteristic!
-              .write([value], withoutResponse: false);
+              .write(bytes, withoutResponse: false);
           print("Command sent successfully: $value");
         } else {
           print("Write characteristic does not support write operations.");
@@ -178,6 +229,8 @@ class BLEManager extends ChangeNotifier {
   }
 
   bool isScanning = false;
+  StreamSubscription<List<ScanResult>>? _scanSub;
+  StreamSubscription<bool>? _isScanningStateSub;
 
   /// Request necessary permissions
   Future<void> requestPermissions() async {
@@ -188,7 +241,7 @@ class BLEManager extends ChangeNotifier {
     ].request();
 
     if (statuses.values.any((status) => status.isDenied)) {
-      print("Required permissions are denied. Scanning may not work.");
+      debugPrint("Required permissions are denied. Scanning may not work.");
     }
   }
 
@@ -196,36 +249,52 @@ class BLEManager extends ChangeNotifier {
   Future<void> startScan() async {
     await requestPermissions();
 
-    if (!isScanning) {
-      devicesList.clear();
-      isScanning = true;
-      notifyListeners();
+    if (isScanning) return;
 
-      FlutterBluePlus.startScan(timeout: const Duration(seconds: 5));
-      print("ble scan started, paired ID: ${globalSettings!.pairedManifoldId}");
-      FlutterBluePlus.scanResults.listen((results) {
-        for (ScanResult result in results) {
-          if (!devicesList.contains(result.device)) {
-            devicesList.add(result.device);
-            notifyListeners();
-          }
-          if (result.device.remoteId.str == globalSettings!.pairedManifoldId) {
-            print("paired device found");
-            FlutterBluePlus.stopScan();
-            _connectToDevice(result.device);
-            break;
-          }
-        }
-      }).onDone(() {
+    _scanSub?.cancel();
+    _isScanningStateSub?.cancel();
+    devicesList.clear();
+    isScanning = true;
+    notifyListeners();
+
+    _isScanningStateSub = FlutterBluePlus.isScanning.listen((scanning) {
+      if (!scanning && isScanning) {
         isScanning = false;
+        _scanSub?.cancel();
+        _isScanningStateSub?.cancel();
         notifyListeners();
-      });
-    }
+        _scheduleReconnectScan();
+      }
+    });
+
+    _scanSub = FlutterBluePlus.scanResults.listen((results) {
+      for (ScanResult result in results) {
+        if (!devicesList.contains(result.device)) {
+          devicesList.add(result.device);
+          notifyListeners();
+        }
+        if (result.device.remoteId.str == globalSettings!.pairedManifoldId) {
+          debugPrint("paired device found");
+          FlutterBluePlus.stopScan();
+          _connectToDevice(result.device);
+          break;
+        }
+      }
+    });
+
+    FlutterBluePlus.startScan(
+      timeout: const Duration(seconds: 5),
+      withServices: [Guid(oasmanServiceUuid)],
+    );
+    debugPrint(
+        "ble scan started, paired ID: ${globalSettings!.pairedManifoldId}");
   }
 
   /// Stop scanning
   Future<void> stopScan() async {
     await FlutterBluePlus.stopScan();
+    _scanSub?.cancel();
+    _isScanningStateSub?.cancel();
     isScanning = false;
     notifyListeners();
   }
@@ -242,8 +311,7 @@ class BLEManager extends ChangeNotifier {
       notifyListeners();
 
       await discoverServices(device, context);
-      await sendRestCommand(
-          [BTOasIdentifier.GETCONFIGVALUES]); //ask for config from manifold
+      await _onConnectionCompleted();
 
       print("Successfully connected to ${device.name} (${device.id})");
       bleBroadcastName = device.name;
@@ -256,38 +324,27 @@ class BLEManager extends ChangeNotifier {
     }
   }
 
-  void _connectToDevice(BluetoothDevice device) async {
+  void _connectToDevice(BluetoothDevice device, [BuildContext? context]) async {
     try {
       _startGlobalConnListener(); // ensure listener is active
       print("Connecting to device: ${device.name} (${device.id})");
-      await device.connect(autoConnect: true);
+      await device.connect(autoConnect: false);
 
       connectedDevice = device;
       notifyListeners();
 
-      await sendRestCommand(
-          [BTOasIdentifier.GETCONFIGVALUES]); //ask for config from manifold
+      await discoverServices(device, context);
+      await _onConnectionCompleted();
 
       print("Successfully connected to ${device.name} (${device.id})");
       bleBroadcastName = device.name;
       globalSettings?.pairedManifoldId = device.id.toString();
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('_passkeyText', device.id.toString());
+      await prefs.setString('_pairedManifoldId', device.id.toString());
     } catch (e) {
-      print("Error connecting to device: $e");
+      debugPrint("Error connecting to device: $e");
       await disconnectDevice();
-      _retryConnection(device);
-    }
-  }
-
-  void _retryConnection(BluetoothDevice device) async {
-    try {
-      await device.connect(autoConnect: true);
-    } catch (e) {
-      debugPrint("Reconnect failed: $e");
-      Future.delayed(const Duration(seconds: 3), () {
-        _retryConnection(device);
-      });
+      _scheduleReconnectScan();
     }
   }
 
@@ -307,6 +364,7 @@ class BLEManager extends ChangeNotifier {
         connectedDevice = null;
         restCharacteristic = null;
         statusCharacteristic = null;
+        valveControlCharacteristic = null;
         notifyListeners();
       }
     }
@@ -352,9 +410,40 @@ class BLEManager extends ChangeNotifier {
         [BLEInt(passkey), BLEInt(0 /*AuthResult::AUTHRESULT_WAITING*/)]));
   }
 
-  /// Discover services and characteristics
+  /// Send compressor on/off (CompressorStatusPacket, cmd 24). When connected only.
+  void sendCompressorStatus(bool on) {
+    sendRestCommand(buildRestPacket(
+        BTOasIdentifier.COMPRESSORSTATUS, [BLEInt(on ? 1 : 0)]));
+  }
+
+  /// Mirrors Wireless_Controller's onBLEConnectionCompleted():
+  ///   sendConfigValuesPacket(false) + requestPreset() + sendUpdateStatusRequestPacket()
+  Future<void> _onConnectionCompleted() async {
+    await sendRestCommand(buildRestPacket(BTOasIdentifier.GETCONFIGVALUES, []));
+    requestPresetData(2); // default preset 3 → 0-based index 2
+    sendUpdateStatusRequest();
+  }
+
+  /// Request the manifold's saved pressures for a preset (0-based index).
+  void requestPresetData(int presetIndex) {
+    sendRestCommand(buildRestPacket(BTOasIdentifier.PRESETREPORT, [
+      BLEShort(0),
+      BLEShort(0),
+      BLEShort(0),
+      BLEShort(0),
+      BLEShort(presetIndex),
+    ]));
+  }
+
+  /// Ask the manifold for its current update status string.
+  void sendUpdateStatusRequest() {
+    sendRestCommandString(
+        _encodeInt32(BTOasIdentifier.UPDATESTATUSREQUEST), 'UNKNOWN');
+  }
+
+  /// Discover services and characteristics. [context] optional for auth-fail dialog.
   Future<void> discoverServices(
-      BluetoothDevice device, BuildContext context) async {
+      BluetoothDevice device, BuildContext? context) async {
     try {
       List<BluetoothService> services = await device.discoverServices();
       for (BluetoothService service in services) {
@@ -440,7 +529,7 @@ class BLEManager extends ChangeNotifier {
     }
   }
 
-  void _handleIncomingRestData(List<int> data, BuildContext context) {
+  void _handleIncomingRestData(List<int> data, BuildContext? context) {
     try {
       //if (data.length >= 16) {
       final packetId = _decodeInt32(data, 0);
@@ -454,13 +543,16 @@ class BLEManager extends ChangeNotifier {
           //print(_decodeInt32(data, 8).toString());
           if (_decodeInt32(data, 8) == 2 /*AuthResult::AUTHRESULT_FAIL*/) {
             disconnectDevice();
-            showDialog(
-              context: context,
-              builder: (_) => const InvalidPasskeyPopup(),
-            );
+            if (context != null && context.mounted) {
+              showDialog(
+                context: context,
+                builder: (_) => const InvalidPasskeyPopup(),
+              );
+            }
           }
           break;
-        case BTOasIdentifier.GETCONFIGVALUES: // handle incoming config (args32[0], args32[1], args16[4], args16[5], args8[12+0..8])
+        case BTOasIdentifier
+              .GETCONFIGVALUES: // handle incoming config (args32[0], args32[1], args16[4], args16[5], args8[12+0..8])
           systemShutoffTimeM = _decodeInt32(data, 4); // args32()[0]
           final configFlagsBits = _decodeInt32(data, 8); // args32()[1]
           pressureSensorMax = _decodeShort(data, 12); // args16()[4]
@@ -470,19 +562,53 @@ class BLEManager extends ChangeNotifier {
           compressorOffPSI = data.length > 18 ? data[18] : 0;
           // setValues at data[19] - not needed for display
 
-          riseOnStart = (configFlagsBits & (1 << ConfigFlagsBit.CONFIG_RISE_ON_START)) != 0;
-          maintainPressure = (configFlagsBits & (1 << ConfigFlagsBit.CONFIG_MAINTAIN_PRESSURE)) != 0;
-          airOutOnShutoff = (configFlagsBits & (1 << ConfigFlagsBit.CONFIG_AIR_OUT_ON_SHUTOFF)) != 0;
-          safetyMode = (configFlagsBits & (1 << ConfigFlagsBit.CONFIG_SAFETY_MODE)) != 0;
+          riseOnStart =
+              (configFlagsBits & (1 << ConfigFlagsBit.CONFIG_RISE_ON_START)) !=
+                  0;
+          maintainPressure = (configFlagsBits &
+                  (1 << ConfigFlagsBit.CONFIG_MAINTAIN_PRESSURE)) !=
+              0;
+          airOutOnShutoff = (configFlagsBits &
+                  (1 << ConfigFlagsBit.CONFIG_AIR_OUT_ON_SHUTOFF)) !=
+              0;
+          safetyMode =
+              (configFlagsBits & (1 << ConfigFlagsBit.CONFIG_SAFETY_MODE)) != 0;
+          aiStatusEnabled = (configFlagsBits &
+                  (1 << ConfigFlagsBit.CONFIG_AI_STATUS_ENABLED)) !=
+              0;
 
           // Store full args (100 bytes) for echoing back when saving config
           if (data.length >= 104) {
             _lastConfigArgs = List<int>.from(data.sublist(4, 104));
             if (_lastConfigArgs!.length < 100) {
-              _lastConfigArgs!.addAll(List.filled(100 - _lastConfigArgs!.length, 0));
+              _lastConfigArgs!
+                  .addAll(List.filled(100 - _lastConfigArgs!.length, 0));
             }
           }
 
+          break;
+        case BTOasIdentifier.PRESETREPORT:
+          // args16[0..3] = wheel pressures, args16[4] = profile index
+          if (data.length >= 14) {
+            final fp = _decodeShort(data, 4);
+            final rp = _decodeShort(data, 6);
+            final fd = _decodeShort(data, 8);
+            final rd = _decodeShort(data, 10);
+            final profileIndex = _decodeShort(data, 12);
+            presetPressures[profileIndex] = [fp, rp, fd, rd];
+            debugPrint(
+                'PRESETREPORT preset=$profileIndex pressures=[$fp, $rp, $fd, $rd]');
+          }
+          break;
+        case BTOasIdentifier.UPDATESTATUSREQUEST:
+          // args contain a null-terminated C string starting at byte 4
+          if (data.length > 4) {
+            final strBytes = data.sublist(4);
+            final nullIdx = strBytes.indexOf(0);
+            updateStatus = String.fromCharCodes(
+                nullIdx >= 0 ? strBytes.sublist(0, nullIdx) : strBytes);
+            debugPrint('UPDATESTATUSREQUEST status=$updateStatus');
+          }
           break;
       }
 
@@ -593,10 +719,13 @@ class BLEManager extends ChangeNotifier {
 
   int _buildConfigFlagsBits() {
     int bits = 0;
-    if (maintainPressure) bits |= (1 << ConfigFlagsBit.CONFIG_MAINTAIN_PRESSURE);
+    if (maintainPressure)
+      bits |= (1 << ConfigFlagsBit.CONFIG_MAINTAIN_PRESSURE);
     if (riseOnStart) bits |= (1 << ConfigFlagsBit.CONFIG_RISE_ON_START);
-    if (airOutOnShutoff) bits |= (1 << ConfigFlagsBit.CONFIG_AIR_OUT_ON_SHUTOFF);
+    if (airOutOnShutoff)
+      bits |= (1 << ConfigFlagsBit.CONFIG_AIR_OUT_ON_SHUTOFF);
     if (safetyMode) bits |= (1 << ConfigFlagsBit.CONFIG_SAFETY_MODE);
+    if (aiStatusEnabled) bits |= (1 << ConfigFlagsBit.CONFIG_AI_STATUS_ENABLED);
     return bits;
   }
 
