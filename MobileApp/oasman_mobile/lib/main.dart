@@ -57,14 +57,12 @@ class _MyAppState extends State<MyApp> {
       );
     }
 
-    // One-time auto-connect to paired manifold when app becomes ready
-    if (!_autoConnectTriggered &&
-        globalSettings?.pairedManifoldId != null &&
-        globalSettings!.pairedManifoldId.isNotEmpty) {
+    // Enable background auto-reconnect once when app becomes ready
+    if (!_autoConnectTriggered) {
       _autoConnectTriggered = true;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!context.mounted) return;
-        Provider.of<BLEManager>(context, listen: false).startScan();
+        Provider.of<BLEManager>(context, listen: false).enableAutoReconnect();
       });
     }
 

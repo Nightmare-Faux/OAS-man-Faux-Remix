@@ -97,22 +97,55 @@ class BLEManager extends ChangeNotifier {
   StreamSubscription<List<int>>? restStream;
   StreamSubscription<List<int>>? statusStream;
   StreamSubscription<OnConnectionStateChangedEvent>? _globalConnSub;
+  Timer? _reconnectTimer;
+  bool _autoReconnectEnabled = false;
+
+  /// Start the background reconnect loop. Safe to call multiple times.
+  void enableAutoReconnect() {
+    _autoReconnectEnabled = true;
+    _startGlobalConnListener();
+    _scheduleReconnectScan();
+  }
+
+  /// Stop the background reconnect loop (e.g. when manually disconnecting).
+  void disableAutoReconnect() {
+    _autoReconnectEnabled = false;
+    _reconnectTimer?.cancel();
+    _reconnectTimer = null;
+  }
+
+  void _scheduleReconnectScan() {
+    _reconnectTimer?.cancel();
+    if (!_autoReconnectEnabled) return;
+    if (connectedDevice != null) return;
+
+    final pairedId = globalSettings?.pairedManifoldId ?? '';
+    if (pairedId.isEmpty) return;
+
+    _reconnectTimer = Timer(const Duration(seconds: 5), () {
+      if (connectedDevice == null && _autoReconnectEnabled) {
+        debugPrint('Auto-reconnect: starting scan...');
+        startScan();
+      }
+    });
+  }
 
   void _startGlobalConnListener() {
     _globalConnSub?.cancel();
     _globalConnSub =
         FlutterBluePlus.events.onConnectionStateChanged.listen((event) {
-      // fires for ALL devices
       debugPrint(
           'Global conn event: ${event.device.id} -> ${event.connectionState}');
       if (connectedDevice?.id == event.device.id &&
           event.connectionState == BluetoothConnectionState.disconnected) {
-        print('Manifold disconnected!');
+        debugPrint('Manifold disconnected!');
         connectedDevice = null;
         vehicleOn = false;
         restCharacteristic = null;
         statusCharacteristic = null;
+        valveControlCharacteristic = null;
         notifyListeners();
+        _scheduleReconnectScan();
       }
     });
   }
@@ -196,6 +229,8 @@ class BLEManager extends ChangeNotifier {
   }
 
   bool isScanning = false;
+  StreamSubscription<List<ScanResult>>? _scanSub;
+  StreamSubscription<bool>? _isScanningStateSub;
 
   /// Request necessary permissions
   Future<void> requestPermissions() async {
@@ -206,7 +241,7 @@ class BLEManager extends ChangeNotifier {
     ].request();
 
     if (statuses.values.any((status) => status.isDenied)) {
-      print("Required permissions are denied. Scanning may not work.");
+      debugPrint("Required permissions are denied. Scanning may not work.");
     }
   }
 
@@ -214,39 +249,52 @@ class BLEManager extends ChangeNotifier {
   Future<void> startScan() async {
     await requestPermissions();
 
-    if (!isScanning) {
-      devicesList.clear();
-      isScanning = true;
-      notifyListeners();
+    if (isScanning) return;
 
-      FlutterBluePlus.startScan(
-        timeout: const Duration(seconds: 5),
-        withServices: [Guid(oasmanServiceUuid)],
-      );
-      print("ble scan started, paired ID: ${globalSettings!.pairedManifoldId}");
-      FlutterBluePlus.scanResults.listen((results) {
-        for (ScanResult result in results) {
-          if (!devicesList.contains(result.device)) {
-            devicesList.add(result.device);
-            notifyListeners();
-          }
-          if (result.device.remoteId.str == globalSettings!.pairedManifoldId) {
-            print("paired device found");
-            FlutterBluePlus.stopScan();
-            _connectToDevice(result.device);
-            break;
-          }
-        }
-      }).onDone(() {
+    _scanSub?.cancel();
+    _isScanningStateSub?.cancel();
+    devicesList.clear();
+    isScanning = true;
+    notifyListeners();
+
+    _isScanningStateSub = FlutterBluePlus.isScanning.listen((scanning) {
+      if (!scanning && isScanning) {
         isScanning = false;
+        _scanSub?.cancel();
+        _isScanningStateSub?.cancel();
         notifyListeners();
-      });
-    }
+        _scheduleReconnectScan();
+      }
+    });
+
+    _scanSub = FlutterBluePlus.scanResults.listen((results) {
+      for (ScanResult result in results) {
+        if (!devicesList.contains(result.device)) {
+          devicesList.add(result.device);
+          notifyListeners();
+        }
+        if (result.device.remoteId.str == globalSettings!.pairedManifoldId) {
+          debugPrint("paired device found");
+          FlutterBluePlus.stopScan();
+          _connectToDevice(result.device);
+          break;
+        }
+      }
+    });
+
+    FlutterBluePlus.startScan(
+      timeout: const Duration(seconds: 5),
+      withServices: [Guid(oasmanServiceUuid)],
+    );
+    debugPrint(
+        "ble scan started, paired ID: ${globalSettings!.pairedManifoldId}");
   }
 
   /// Stop scanning
   Future<void> stopScan() async {
     await FlutterBluePlus.stopScan();
+    _scanSub?.cancel();
+    _isScanningStateSub?.cancel();
     isScanning = false;
     notifyListeners();
   }
@@ -294,20 +342,9 @@ class BLEManager extends ChangeNotifier {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('_pairedManifoldId', device.id.toString());
     } catch (e) {
-      print("Error connecting to device: $e");
+      debugPrint("Error connecting to device: $e");
       await disconnectDevice();
-      _retryConnection(device);
-    }
-  }
-
-  void _retryConnection(BluetoothDevice device) async {
-    try {
-      await device.connect(autoConnect: false);
-    } catch (e) {
-      debugPrint("Reconnect failed: $e");
-      Future.delayed(const Duration(seconds: 3), () {
-        _retryConnection(device);
-      });
+      _scheduleReconnectScan();
     }
   }
 
