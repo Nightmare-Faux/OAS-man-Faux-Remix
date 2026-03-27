@@ -198,9 +198,8 @@ class _ButtonsPageState extends State<ButtonsPage> {
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               OutlinedButton(
-                onPressed: canUsePresetActions
-                    ? () => _confirmSavePreset(context)
-                    : null,
+                onPressed:
+                    canUsePresetActions ? () => _saveSelectedPreset() : null,
                 style: OutlinedButton.styleFrom(
                   foregroundColor: const Color(0xFFBB86FC),
                   side: const BorderSide(color: Color(0xFFBB86FC)),
@@ -241,34 +240,13 @@ class _ButtonsPageState extends State<ButtonsPage> {
       );
       return;
     }
-    setState(() => _selectedPreset = presetNum);
-    if (presetNum == 1) {
-      showDialog<bool>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          title: const Text('Air out?'),
-          content: const Text(
-            'Preset 1 is typically air out. Please verify your car is not moving.',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(false),
-              child: const Text('Cancel'),
-            ),
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(true),
-              child: const Text('Confirm'),
-            ),
-          ],
-        ),
-      ).then((confirmed) {
-        if (confirmed == true && context.mounted) {
-          _sendLoadPreset(presetNum);
-        }
-      });
-    } else {
-      _sendLoadPreset(presetNum);
+    if (_selectedPreset == presetNum) {
+      _showPresetDialog(context, presetNum);
+      return;
     }
+
+    setState(() => _selectedPreset = presetNum);
+    bleManager.requestPresetData(presetNum - 1);
   }
 
   void _sendLoadPreset(int presetNum) {
@@ -305,34 +283,45 @@ class _ButtonsPageState extends State<ButtonsPage> {
     }
   }
 
-  void _confirmSavePreset(BuildContext context) {
+  void _saveSelectedPreset() {
     if (bleManager.connectedDevice == null || _selectedPreset < 1) return;
-    showDialog<bool>(
+    bleManager.sendRestCommand(bleManager.buildRestPacket(
+        BTOasIdentifier.SAVECURRENTPRESSURESTOPROFILE,
+        [BLEInt(_selectedPreset - 1)]));
+    bleManager.sendRestCommand([BTOasIdentifier.GETCONFIGVALUES]);
+    bleManager.requestPresetData(_selectedPreset - 1);
+  }
+
+  void _showPresetDialog(BuildContext context, int presetNum) {
+    final data = bleManager.presetPressures[presetNum - 1];
+    final hasData = data != null && data.length >= 4;
+
+    showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Save preset'),
-        content: Text(
-          'Save current height to preset $_selectedPreset?',
-        ),
+        title: Text('Preset $presetNum'),
+        content: hasData
+            ? Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Front Passenger: ${data[0]}'),
+                  Text('Rear Passenger: ${data[1]}'),
+                  Text('Front Driver: ${data[2]}'),
+                  Text('Rear Driver: ${data[3]}'),
+                ],
+              )
+            : const Text(
+                'No preset data available yet.\nTap another preset and come back after data is received.',
+              ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text('Confirm'),
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Close'),
           ),
         ],
       ),
-    ).then((confirmed) {
-      if (confirmed == true) {
-        bleManager.sendRestCommand(bleManager.buildRestPacket(
-            BTOasIdentifier.SAVECURRENTPRESSURESTOPROFILE,
-            [BLEInt(_selectedPreset - 1)]));
-        bleManager.sendRestCommand([BTOasIdentifier.GETCONFIGVALUES]);
-      }
-    });
+    );
   }
 
   void openValve(BuildContext context, int bit) {
